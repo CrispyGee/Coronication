@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+<link rel="shortcut icon" type="image/x-icon" href="imgs/favicon.png">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script> 
+<script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+<link href="https://fonts.googleapis.com/css?family=Open+Sans&display=swap" rel="stylesheet">
+<link rel="stylesheet" type="text/css" href="styles/reset.css">
+<link rel="stylesheet" type="text/css" href="styles/style.css">
+<style type="text/css">
+    #mynetwork {
+      width: 100%;
+      height: 650px;
+      display: none;
+    }
+    #teillink{
+      display: none;
+      width: 50%;
+      margin: auto;
+      background-color: #e5e5e5;
+      border-radius: 25px;
+    }
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.9-1/core.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.9-1/md5.js"></script>
+<script type="text/javascript" src="scripts/libraries/tools.js"></script>
+<script type="text/javascript" src="scripts/libraries/tools.js"></script>
+<script type="text/javascript" src="scripts/script.js"></script>
+<script>
+
+    var password;
+    var email;
+    var passhash;
+    var link;
+    var erkranktMap = {};
+    var kontaktMap = {};
+
+    function load_function(){
+        str = window.location.href;
+        str = str.split("/");
+        link = str[str.length - 1].substr(1);
+        email = sessionStorage.getItem('email');
+        passhash = sessionStorage.getItem('passhash');
+        if (email != null){
+            hide("title");
+            checkwhatfunction("http://ec2-18-195-125-154.eu-central-1.compute.amazonaws.com/test/#" + email);
+        } 
+    }
+
+    function loadlogin(){
+        hide("title");
+        show("signIn");
+    }
+
+    function checkwhatfunction(login){
+        hide("signIn");
+        if (login != "") {
+            if (link != "") {
+                linktoOther();
+            }
+            createLink(login);
+            checkformular();
+
+        }
+        else {
+            if (link == "") {
+                register();
+            }
+            else{
+                createAndlinktoOther();
+            }
+        }
+    }
+
+    function getNodes(graph){
+        var nodes = [];
+        nodes.push(graph["ID"]);
+        erkranktMap[graph["ID"]] = graph["Erkrankt"];
+        kontaktMap[graph["ID"]] = graph["Kontakt"];
+
+        if (graph["connectedUsers"] && graph["connectedUsers"].length > 0)
+        for(var user of graph["connectedUsers"]) {
+            var currentNodes = getNodes(user);
+            for (var currentNode of currentNodes) {
+                if (!nodes.includes(currentNode)) {
+                    nodes.push(currentNode);
+                }
+            }
+        }
+        return nodes;
+    }
+
+    function mapNodes(nodesArray){
+        // [
+        //             {id: 1, label: 'Node 1',color:'red'},
+        //             {id: 2, label: 'Node 2'},
+        //             {id: 3, label: 'Node 3'},
+        //             {id: 4, label: 'Node 4'},
+        //             {id: 5, label: 'Node 5'}
+        //]
+        var mappedNodes = [];
+        var firstNode = true;
+        for (var node of nodesArray) {
+            var mappedNode = {id: node, label: 'N', color:'#82E0AA'};
+            if (firstNode) {
+                firstNode = false;
+                mappedNode = {id: node, label: 'Sie', color: '#3498DB'};
+            }
+            else if (erkranktMap[node] == "1"){
+                mappedNode = {id: node, label: 'C', color: '#E74C3C'};
+            }
+            else if (kontaktMap[node] == "1"){
+                mappedNode = {id: node, label: 'G', color: '#FFA500'};
+            }
+            // mappedNode["borderWidth"] = 0;
+            mappedNodes.push(mappedNode);
+        }
+        return mappedNodes;
+    }
+
+    function getEdges(graph){
+        var edges = [];
+        if (graph["connectedUsers"] && graph["connectedUsers"].length > 0)
+        for(var user of graph["connectedUsers"]) {
+            var edge = '{"from": '+graph["ID"]+', "to": '+user["ID"]+'}';
+            edges.push(edge);
+            var moreEdges = getEdges(user);
+            for (var currentEdge of moreEdges) {
+                if (!edges.includes(currentEdge)) {
+                    edges.push(currentEdge);
+                }
+            }
+        }
+        return edges;
+    }
+
+function mapEdges(edgesArray){
+        // [
+        //     {from: 1, to: 3},
+        //     {from: 3, to: 1},
+        //     {from: 1, to: 2},
+        //     {from: 2, to: 4},
+        //     {from: 2, to: 5},
+        //     {from: 3, to: 3}
+        // ]
+        var mappedEdges = [];
+        for (var edge of edgesArray){
+            var mappedEdge = JSON.parse(edge);
+            mappedEdges.push(mappedEdge);
+        }
+        var withoutDuplicates = [];
+        for (var edge of mappedEdges){
+            var isDuplicate = false;
+            for (var includedEdge of withoutDuplicates){
+                if (edge.from == includedEdge.from && edge.to == includedEdge.to){
+                    isDuplicate = true;
+                    break;
+                }
+                else if (edge.from == includedEdge.to && edge.to == includedEdge.from){
+                    isDuplicate = true;
+                    break;
+                }
+            }
+            if (!isDuplicate){
+                withoutDuplicates.push(edge);
+            }
+        }
+        return withoutDuplicates;
+    }
+
+    function getConnectedUsers(){
+        var urlParams = new URLSearchParams(window.location.search);
+        $.ajax({                                      
+            url: 'GraphDB.php',       
+            type: "POST",
+            data: { 
+                email: email,
+                password: passhash,
+                funktionsname: "anliegende_nutzer_abfragen"
+            } 
+            }).done(function( msg ) {
+                var graph = JSON.parse(msg);
+                var nodes = [];
+                var nodeArray = getNodes(graph);
+                var mappedNodes = mapNodes(nodeArray);
+                var nodes = new vis.DataSet(mappedNodes);
+                // create an array with edges
+                var edgesArray = getEdges(graph);
+                var mappedEdges = mapEdges(edgesArray);
+                var edges = new vis.DataSet(mappedEdges);
+
+                // create a network
+                var container = document.getElementById('mynetwork');
+                var data = {
+                    nodes: nodes,
+                    edges: edges
+                };
+                var options = {};
+                var network = new vis.Network(container, data, options);
+            });
+    }
+
+    function checklogin(){
+        password = document.getElementsByClassName("password")[0].value;
+        email = document.getElementsByClassName("email")[0].value;
+        passhash = CryptoJS.MD5(password).toString();
+
+        sessionStorage.setItem('email', email);
+        sessionStorage.setItem('passhash', passhash);
+
+        $.ajax({                                      
+            url: 'php_sql.php',       
+            type: "POST",
+            data: { 
+                email: email,
+                password: passhash,
+                funktionsname: "login"
+            } 
+            }).then(function( msg ) {
+                checkwhatfunction(msg);
+            });
+    }
+
+    function register(){
+        $.ajax({                                      
+            url: 'php_sql.php',       
+            type: "POST",
+            data: { 
+                email: email,
+                password: passhash,
+                funktionsname: "nutzer_erstellen"
+            } 
+            }).done(function( msg ) {
+                show("data");
+            });
+        }
+
+    function createAndlinktoOther(){
+        $.ajax({                                      
+            url: 'php_sql.php',       
+            type: "POST",
+            data: { 
+                email: email,
+                password: passhash,
+                verbindung: link,
+                funktionsname: "nutzer_erstellen_verbinden"
+            } 
+            }).done(function( msg ) {
+                show("data");
+            });
+        }
+
+    function linktoOther(){
+        $.ajax({                                      
+            url: 'php_sql.php',       
+            type: "POST",
+            data: { 
+                email: email,
+                password: passhash,
+                verbindung: link,
+                funktionsname: "nutzer_verbinden"
+            }
+            }).done(function( msg ) {
+            });
+    }
+
+    function fillformular(){
+        var vorname = document.getElementsByClassName("vorname")[0].value;
+        var nachname = document.getElementsByClassName("nachname")[0].value;
+        var alter = document.getElementsByClassName("alter")[0].value;
+        var kontakt = false;
+        var erkrankt = false;
+
+        if (document.getElementsByClassName("erkrankt")[0].checked == true) {
+            erkrankt = true;
+        }
+        if (document.getElementsByClassName("kontakt")[0].checked == true) {
+            kontakt = true;
+        }
+
+
+        $.ajax({                                      
+            url: 'php_sql.php',       
+            type: "POST",
+            data: { 
+                email: email,
+                password: passhash,
+                alter: alter,
+                nachname: nachname,
+                vorname: vorname,
+                erkrankt: erkrankt,
+                direkterKontakt: kontakt,
+                funktionsname: "formularausfuellen"
+            }
+            }).done(function( msg ) {
+                if (msg == "funktioniert") {
+                    hide("data");
+                    show("mynetwork");
+                    getConnectedUsers();
+                }
+            });
+    }
+
+    function checkformular(){
+        $.ajax({                                      
+            url: 'php_sql.php',       
+            type: "POST",
+            data: { 
+                email: email,
+                password: passhash,
+                funktionsname: "formularausgefuellt"
+            }
+            }).done(function( msg ) {
+                console.log(msg)
+                if (msg != "ausgefuellt"){
+                    show("data");
+                }
+                else{
+                    show("mynetwork");
+                    getConnectedUsers();
+                }
+            });
+    }
+
+    function hide(element){
+        document.getElementById(element).style.display = "none";
+    }
+
+    function show(element){
+        document.getElementById(element).style.display = "block";
+    }
+
+    function createLink(link){
+        show("teillink");
+        document.getElementById("sharelink").innerHTML = link;
+        document.getElementById("sharelink").href = link;
+    }
+
+</script>
+
+
+
+</head>
+<body onload="load_function()">
+
+
+        <div class="navbar">
+            <div class="logo"><img src="imgs/Logo_weiss.png" height="20%" width="20%"></div>
+            
+        </div>
+        <section id="title" class="title">
+            <div class="ue">
+            <h1>Infektion vermeiden<br>ohne soziale Isolation</h1>
+            <a onclick="loadlogin()"><div class="buttonReg">Registrierung & Login</div>
+            </div></a>
+
+            <div class="titelbild"><img src="imgs/bgrnd.png" height="100%" width="100%"></div>
+            
+            
+        </section>
+        <section id="signIn" class="signIn">
+            <div class="ue">
+            <h2>Anmelden</h2>
+            <h3>Melden Sie sich für den Zugang zu Ihrem Benutzerprofil an.</h2>
+            
+            <div class="form">
+                <form>
+                <label for="fname">Email-Adresse:</label><br>
+                <input type="email" class="email" id="fname" name="fname" placeholder=""><br>
+                <label for="lname">Passwort:</label><br>
+                <input type="password" class="password" id="lname" name="lname"><br><br>
+                <input id="submit" type="button" value="Anmelden" onclick="checklogin()">
+                </form>
+            </div>
+            </div>
+
+            <div class="titelbild"><img src="imgs/bgrnd.png" height="100%" width="100%"></div>
+
+        </section>
+        <section id="data" class="data">
+            <div class="ue">
+            <h2>Bitte vervollständigen Sie Ihr Benutzerprofil.</h2>
+            <h3>Die Angaben dienen zur Risikoabschätzung und der Generierung von Infektionsketten.</h2><br>
+            
+            <p>Einschätzung der Risikogruppe:</p>
+            <div class="form">
+                <form>
+
+                <label for="fname">Vorname</label><br>
+                <input type="text" class= "vorname" id="fname" name="fname" placeholder=""><br>
+
+                <label for="lname">Nachname</label><br>
+                <input type="text" class="nachname" id="lname" name="lname"  placeholder=""><br>
+
+                <label for="age">Alter</label><br>
+                <input type="number" class="alter" id="age" name="age"><br>
+
+                <label for="sick">Sind Sie Erkrankt?</label><br>
+                <input type="radio" class="erkrankt" id="yes" name="sick" value="True">
+                <label for="yes">Ja</label><br>
+                <input type="radio" class="erkrankt" id="no" name="sick" value="False">
+                <label for="no">Nein</label><br>
+
+                <label for="people">Hatten Sie Kontakt zu Erkrankten?</label><br>
+                <input type="radio" class="kontakt" id="yes2" name="people" value="True">
+                <label for="yes2">Ja</label><br>
+                <input type="radio" class="kontakt" id="no2" name="people" value="False">
+                <label for="no2">Nein</label><br><br>
+                
+                <input id="submit" type="button" value="Abschicken" onclick="fillformular()">
+                </form>
+            </div>
+            </div>
+
+            <div class="titelbild"><img src="imgs/bgrnd.png" height="100%" width="100%"></div>
+
+        </section>
+        <section id="mynetwork">
+            
+            <div class="titelbild"><img src="imgs/bgrnd.png" height="100%" width="100%"></div>
+
+
+        </section>
+        <section id="teillink">
+            <td>Bitte schicken sie den generierten Link an alle Personen weiter, zu denen Sie direkten (face-to-face, z.B. Gespräch, Umarmung, Küssen) Kontakt hatten:</td>
+            <td><a id="sharelink"></a></td>
+        </section>
+        <section class="info">
+            <div class="infoCopy">
+                <h2>Tragen Sie dazu bei, die Welt ein Stück gesünder zu machen.</h2>
+                <h3 style="color:#808080;">Vorteile, die sich dem Nutzer bieten.</h3>
+            </div>
+            <div class="tabelle">
+            <table>
+                <tr>
+                    <th><img src="imgs/icon_01.png" height="80%" width="200px"></th>
+                    <th><img src="imgs/icon_02.png" height="80%" width="200px"></th>
+                    <th><img src="imgs/icon_03.png" height="80%" width="200px"></th>
+                    <th><img src="imgs/icon_04.png" height="80%" width="200px"></th>
+                </tr>
+                <tr>
+                    <td>Das eigene Risiko feststellen</td>
+                    <td>Die eigene Gesundheit schützen</td>
+                    <td>Nachvollziehbarkeit von Infektionen</td>
+                    <td>Beitrag zur Wissenschaft leisten</td>
+                </tr>
+                <tr>
+                    <td><p>Durch die Simulation der Vernetzung können Sie die Höhe Ihres Infektionsrisikos feststellen. Je mehr Vernetzungen zustande angegeben werden, desto genauer ist das Ergebnis.</p></td>
+                    <td><p>Durch die Vermeidung von sozialen Kontakten in Zeiten des hohen Risikos und das reguläre Sozialverhalten in Zeiten mit niedrigerem Infektionsrisiko können Sie Ihre Gesundheit schützen.</p></td>
+                    <td><p>Um das Gesundheitssystem zu entlasten, ist es von essentieller Bedeutung die Infektionsketten nachzuvollziehen und zu unterbinden. Durch die Visualisierung der Verkettung wird diese Aufgabe erleichtert.</p></td>
+                    <td><p>Durch jede Angabe kann COVID-19 identifizierbar gemacht und weiter analysiert werden, damit in der Zukunft ein Impfstoff oder gezieltes Medikament entwickelt werden kann.</p></td>
+                </tr>
+
+            </table>
+            </div>
+        </section>
+        <div class="footer"><p>Projektinfo AGB Impressum Nachfragen</p></div>
+</body>
+</html>
